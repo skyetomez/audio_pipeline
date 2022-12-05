@@ -1,8 +1,11 @@
 import os
-import pickle5
 import numpy as np 
+
+import pickle5
 from pickle5 import HIGHEST_PROTOCOL
+
 import pyflac
+import soundfile as sf
 """
 This is meant a as a general audio processing pipeline and will be updated as I go. 
 The environmental variables are set because this script is meant to be run on a high power computing cluster. 
@@ -14,16 +17,16 @@ Need to write encode the audio files as FLAC for NOW, will add options for other
 
 """
 
-HOME = os.getenv('HOME')
-WORK = os.getenv('WORK')
-
 #Removed rats with NA on them.  
-PATH = os.path.join(HOME, "/usv_analysis/nath_rat_pipe/unique_rats.txt")
 
 
 class AudioPipe:
     """
     This acts as a general audio processing pipe line it currently only requires a path to work.
+    
+    All writes to the self.writedir and read audio from the self.audiodir
+    Class is centered around the workdir
+    
     _getwritepath()       creates the path to write audio files to 
     _getreaddir()         creates the path to read audio from 
     getIDs()              creates list of acceptable files to read from
@@ -31,9 +34,8 @@ class AudioPipe:
     """
     def __init__(self, fp:str):
         self.workdir = fp
-        self.writedir = self._getwritekdir()
+        self.writedir = self._getwritedir()
         self.audiodir = self._getreaddir()
-        self.audiopathlist = self._createAudioPathList()
 
     def __str__(self):
         return "AudioPath"
@@ -43,7 +45,8 @@ class AudioPipe:
 
     def _getwritedir(self):
         """get the dierctory to write to"""
-        WORK_DIR_PATH = os.path.join(WORK,"5_min_samples")
+        os.chdir(self.workdir)
+        WORK_DIR_PATH = os.path.join(self.workdir,"5_min_samples")
         if not os.path.exists(WORK_DIR_PATH):
             os.mkdir(WORK_DIR_PATH)
             return WORK_DIR_PATH
@@ -52,6 +55,7 @@ class AudioPipe:
         
     def _getreaddir(self):
         """get the directory to be read from"""
+        os.chdir(self.workdir)
         READ_DIR_PATH = os.pathjoin(self.workdir, "audios")
         if not os.path.exists(READ_DIR_PATH):
             os.mkdir(READ_DIR_PATH)
@@ -59,53 +63,66 @@ class AudioPipe:
         else:
             return READ_DIR_PATH       
     
-    def getIDs(self,textPATH:str) -> list: 
+    def getIDs(self,textPATH:str) -> tuple[list]: 
         """
         Reads the IDs of the rats from a txt file by line
         textPATH        This is the path to the text file
         """
-        _, fname = os.path.split(textPATH)
+        TMPPATH, fname = os.path.split(textPATH)
+        
+        os.chdir(TMPPATH)
+        
         with open(fname, 'r') as f:
             id_list = f.readline().strip()
         del id_list[0] # header info.
         for id in id_list:
             id = id.strip()
         self.idlist = id_list
-        return id_list
+        
+        audio_path_list = self._createAudioPathList(self.idlist)
+        
+        return id_list, audio_path_list
     
-    def _createAudioPathList(self, id:str) -> list:
+    def _createAudioPathList(self, id:list) -> list:
         """Create a list of acceptable audio paths to be read from"""
         os.chdir(self.audiodir)
         
         audio_path_list = list()
         #find the audios for each of the rats in the ids and return list element 
         
-        for dirpath, _, filenames in os.walk(self.audiodir, topdown=True):
+        for dirpath, dirname, filenames in os.walk(self.audiodir, topdown=True):
             os.chdir(dirpath)
             for name in filenames:
-                if id in name: 
+                if name in set(self.idlist): 
                     audio_path_list.append(name)
+        
+        
+        self.audiopathlist = audio_path_list
         
         return audio_path_list
 
-    def _savePickle(self, var, name:str):
+    def _savePickle(self, var):
         """save dict as pickle"""
         
-        name = #++??
+        name = "dictionary.pickle"
+        name = os.path.join(self.writedir, name)
         
         with open(var, "wb") as fp:
-            pickle5.dump(var,f"{name}", HIGHEST_PROTOCOL)
-        pass
+            pickle5.dump(fp,f"{name}", HIGHEST_PROTOCOL)
+        
     
-    def _saveAudio(self, audio_buffer:np.array, sr:int):
-        # use audio_buffer and sr to encode into flac. 
-        return
+    def _writeAudio(self, name:str, audio_buffer:np.array, sr:int):
+        os.chdir(self.writedir)
+        sf.write(name, audio_buffer, sr)
+        os.chdir()
+
 
     def _sampleAudio1(self, audio:np.array, sr:int) -> np.ndarray:
         """auxiliary function to sample only the first minute of audio"""
-        fithminute = sr * 5
-        sampleFiveminutes = audio[0:fithminute]
+        fifthminute = sr * 5
+        sampleFiveminutes = audio[0:fifthminute]
         return sampleFiveminutes
+ 
     
     def _sampleAudioS(self, audio:np.array, sr:int) -> list:
         """
@@ -114,11 +131,8 @@ class AudioPipe:
         """
         length = len(audio)
         fiveminute = 5*sr
-        
         window_length = length//fiveminute
-        
         num_slides = (window_length *2) - 1
-        
         samples = list()
         
         for n in range(num_slides):
@@ -143,7 +157,7 @@ class AudioPipe:
         else: 
             processed = self._sampleAudioS(array, sr)
         
-        return processed
+        return array, sr, processed
     
     
     def sampleAudio(self):
@@ -159,41 +173,16 @@ class AudioPipe:
             fn = os.split(audio_file)[-1].strip().split()[0]
             if fn in self.idlist:
                 fn.append(name)
-                processed.append(self._processAudio(fn))
+                array, sr, tmp = self._processAudio(fn)
+                self._writeAudio(str(fn), array, sr)
+                processed.append(tmp)
+                
         self.data = dict(zip(name,processed))
+        
+        self._savePickle(self.data)
         
         return self.data
 
 
-    #create spectrogram of each of their audios. 
-    def saveSample(object:np.array, name) -> None:
-        FIGURES_PATH = os.path.join(WORK,"spectrograms")
-        os.chdir(FIGURES_PATH)
-        
-        with open(object, 'wb') as f: 
-            pkl.dump(f, f"{name}.spec", HIGHEST_PROTOCOL)
-        
-        return None
-
-# def createSpecs(ids:list) -> str:
-    
-#     sample_rate = 384000
-#     time_res = 20 
-#     n_fft = int(sample_rate / time_res)
-#     hop_length = n_fft // 2  
-  
-    
-#     for id in ids: 
-#         audio_file = os.path.join(WORK,id)
-        
-#         data, _ = librosa.load(audio_file, sr = sample_rate)
-#         fourier = librosa.stft(data, n_fft = n_fft, hop_length=hop_length)
-#         power_spec = librosa.power_to_db(np.abs(fourier), ref=np.max)
-
-#         savePickle(power_spec)
-    
-    
-#     return print("success")
-    
-
-
+if __name__ == '__main__':
+    tmp = AudioPipe()
