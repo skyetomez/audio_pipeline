@@ -1,3 +1,5 @@
+import logging
+
 import os
 import numpy as np 
 
@@ -56,14 +58,14 @@ class AudioPipe:
     def _getreaddir(self):
         """get the directory to be read from"""
         os.chdir(self.workdir)
-        READ_DIR_PATH = os.pathjoin(self.workdir, "audios")
+        READ_DIR_PATH = os.path.join(self.workdir, "audios")
         if not os.path.exists(READ_DIR_PATH):
             os.mkdir(READ_DIR_PATH)
             return READ_DIR_PATH
         else:
             return READ_DIR_PATH       
     
-    def getIDs(self,textPATH:str) -> tuple[list]: 
+    def getIDs(self,textPATH:str) -> tuple[list[str], list[str]]: 
         """
         Reads the IDs of the rats from a txt file by line
         textPATH        This is the path to the text file
@@ -72,18 +74,21 @@ class AudioPipe:
         
         os.chdir(TMPPATH)
         
+        id_list = list()
+        
         with open(fname, 'r') as f:
-            id_list = f.readline().strip()
+            line = f.readline().strip()
+            id_list.append(line)
+
         del id_list[0] # header info.
-        for id in id_list:
-            id = id.strip()
+                 
         self.idlist = id_list
         
         audio_path_list = self._createAudioPathList(self.idlist)
         
         return id_list, audio_path_list
     
-    def _createAudioPathList(self, id:list) -> list:
+    def _createAudioPathList(self, id:list) -> list[str]:
         """Create a list of acceptable audio paths to be read from"""
         os.chdir(self.audiodir)
         
@@ -111,20 +116,26 @@ class AudioPipe:
             pickle5.dump(fp,f"{name}", HIGHEST_PROTOCOL)
         
     
-    def _writeAudio(self, name:str, audio_buffer:np.array, sr:int):
+    def _writeAudio(self, name:str, audio_buffer:np.ndarray, sr:int) -> None:
         os.chdir(self.writedir)
-        sf.write(name, audio_buffer, sr)
-        os.chdir()
+        
+        try: 
+            sf.write(name, audio_buffer, sr)
+            return None
+        except Exception as e: 
+            logging.exception(e)
+        
 
-
-    def _sampleAudio1(self, audio:np.array, sr:int) -> np.ndarray:
+    def _sampleAudio1(self, audio:np.ndarray, sr:int) -> np.ndarray:
         """auxiliary function to sample only the first minute of audio"""
         fifthminute = sr * 5
+        
         sampleFiveminutes = audio[0:fifthminute]
+        
         return sampleFiveminutes
  
     
-    def _sampleAudioS(self, audio:np.array, sr:int) -> list:
+    def _sampleAudioS(self, audio:np.ndarray, sr:int) -> list:
         """
         Version of the auxiliary function that slides over the 
         length of the audio in 5 minute sections returing a list of audio samples
@@ -152,37 +163,51 @@ class AudioPipe:
         """
         decoder = pyflac.FileDecoder(input_file=audiopath)
         array, sr = decoder.process()
+        
+        #Default is take take only the first sample
         if option == None:
-            processed = self._sampleAudio(array, sr)
+            processed = self._sampleAudio1(array, sr)
         else: 
             processed = self._sampleAudioS(array, sr)
         
         return array, sr, processed
     
     
-    def sampleAudio(self):
+    def sampleAudio(self) -> None:
         # open audio 
         """
         This samples the audio files in the readdir and makes a copy of it using 
         the auxiliary _processAudio and _sampleAudio1 or _sampleAudioS functions.
-        It then returns a dictionary of the sampled files
+        Nothing is returned.
+        
+        The ID list parsed from the text file are used to check against the available
+        files in the path list from the read directory. If it is found in the directory,
+        Its name is saved and the name is passed to _processAudio and _writeAudio for 
+        additional processing. 
         """
         processed = list()
-        name = list()
+        verified = list()
+        
+        #  clean each file path and save only the name of the audio.
         for audio_file in self.audiopathlist:
-            fn = os.split(audio_file)[-1].strip().split()[0]
+            fn = os.path.split(audio_file)[-1].strip().split()[0]
+            
+            #check if audio is in list of acceptable audios.
             if fn in self.idlist:
-                fn.append(name)
+                
+                verified.append(fn) 
+                
                 array, sr, tmp = self._processAudio(fn)
                 self._writeAudio(str(fn), array, sr)
+                
                 processed.append(tmp)
                 
-        self.data = dict(zip(name,processed))
+        self.data = dict(zip(verified,processed))
         
         self._savePickle(self.data)
         
-        return self.data
+        return None
 
 
 if __name__ == '__main__':
-    tmp = AudioPipe()
+    pass

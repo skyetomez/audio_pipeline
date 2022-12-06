@@ -2,10 +2,12 @@ import audiopipe as pipe
 import os 
 
 
-HOME = os.getenv('HOME')
-WORK = os.getenv('WORK')
+HOME = str(os.getenv('HOME'))
+WORK = str(os.getenv('WORK'))
 
-TEXTPATH = os.path.join(WORK, "/usv_analysis/nath_rat_pipe/unique_rats.txt")
+textfile_path = "/usv_analysis/nath_rat_pipe/unique_rats.txt"
+
+TEXTPATH = os.path.join(WORK, textfile_path)
 
 
 def main():
